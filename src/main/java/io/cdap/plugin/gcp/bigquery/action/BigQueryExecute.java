@@ -18,16 +18,22 @@ package io.cdap.plugin.gcp.bigquery.action;
 
 import com.google.auth.Credentials;
 import com.google.cloud.bigquery.BigQuery;
+import com.google.cloud.bigquery.Field;
+import com.google.cloud.bigquery.FieldValueList;
 import com.google.cloud.bigquery.Job;
 import com.google.cloud.bigquery.JobId;
 import com.google.cloud.bigquery.JobInfo;
+import com.google.cloud.bigquery.LegacySQLTypeName;
 import com.google.cloud.bigquery.QueryJobConfiguration;
+import com.google.cloud.bigquery.Schema;
 import com.google.cloud.bigquery.TableId;
 import com.google.cloud.bigquery.TableResult;
+import com.google.common.base.Strings;
 import io.cdap.cdap.api.annotation.Description;
 import io.cdap.cdap.api.annotation.Macro;
 import io.cdap.cdap.api.annotation.Name;
 import io.cdap.cdap.api.annotation.Plugin;
+import io.cdap.cdap.etl.api.FailureCollector;
 import io.cdap.cdap.etl.api.PipelineConfigurer;
 import io.cdap.cdap.etl.api.action.Action;
 import io.cdap.cdap.etl.api.action.ActionContext;
@@ -51,13 +57,13 @@ import javax.annotation.Nullable;
 public final class BigQueryExecute extends Action {
   private static final Logger LOG = LoggerFactory.getLogger(BigQueryExecute.class);
   public static final String NAME = "BigQueryExecute";
-  private static final String RECORDS_OUT = "records.out";
+  private static final String RECORDS_PROCESSED = "records.processed";
 
   private Config config;
 
   @Override
   public void run(ActionContext context) throws Exception {
-    config.validate();
+    config.validate(context.getFailureCollector());
     QueryJobConfiguration.Builder builder = QueryJobConfiguration.newBuilder(config.getSql());
     // Run at batch priority, which won't count toward concurrent rate limit.
     if (config.getMode().equals(QueryJobConfiguration.Priority.BATCH)) {
@@ -67,7 +73,7 @@ public final class BigQueryExecute extends Action {
     }
 
     // Save the results of the query to a permanent table.
-    if (config.getDataset() != null  && config.getTable() != null) {
+    if (config.getDataset() != null && config.getTable() != null) {
       builder.setDestinationTable(TableId.of(config.getDataset(), config.getTable()));
     }
 
@@ -105,27 +111,54 @@ public final class BigQueryExecute extends Action {
 
     TableResult queryResults = queryJob.getQueryResults();
     long rows = queryResults.getTotalRows();
+    if (config.shouldSetAsArguments()) {
+      if (rows == 0 || queryResults.getSchema() == null) {
+        LOG.warn("The query result does not contain any row or schema, will not save the results in the arguments");
+      } else {
+        Schema schema = queryResults.getSchema();
+        FieldValueList firstRow = queryResults.iterateAll().iterator().next();
+        for (int i = 0; i < schema.getFields().size(); i++) {
+          Field field = schema.getFields().get(i);
+          String name = field.getName();
+          if (field.getType().equals(LegacySQLTypeName.RECORD)) {
+            LOG.warn("Field {} is a record type with nested schema, will not save the value in the argument", name);
+            continue;
+          }
+          context.getArguments().set(name, firstRow.get(name).getStringValue());
+        }
+      }
+    }
 
-    context.getMetrics().gauge(context.getStageName() + RECORDS_OUT, rows);
+    context.getMetrics().gauge(RECORDS_PROCESSED, rows);
   }
 
   @Override
   public void configurePipeline(PipelineConfigurer configurer) throws IllegalArgumentException {
-    config.validate();
+    config.validate(configurer.getStageConfigurer().getFailureCollector());
   }
 
   /**
    * Config for the plugin.
    */
   public final class Config extends GCPConfig {
-    @Description("Use Legacy SQL.")
-    @Macro
-    private String legacy;
+    private static final String MODE = "mode";
+    private static final String SQL = "sql";
+    private static final String DATASET = "dataset";
+    private static final String TABLE = "table";
 
+    @Description("Specified the dialect for the BigQuery SQL. The value must be 'legacy' or 'standard'. " +
+                   "If set to 'standard', the query will use BigQuery's standard SQL: " +
+                   "https://cloud.google.com/bigquery/sql-reference/. If set to 'legacy', BigQuery's legacy SQL " +
+                   "dialect will be used for this query.")
+    @Macro
+    private String dialect;
+
+    @Name(SQL)
     @Description("BigQuery SQL to execute.")
     @Macro
     private String sql;
 
+    @Name(MODE)
     @Description("Mode to execute the query in. The value must be 'batch' or 'interactive'. " +
                    "A batch query is executed as soon as possible and count towards the concurrent rate limit " +
                    "and the daily rate limit. An interactive query is queued and started as soon as idle resources " +
@@ -142,22 +175,32 @@ public final class BigQueryExecute extends Action {
     @Macro
     private String location;
 
+    @Name(DATASET)
     @Description("The dataset to store the query results in. If not specified, the results will not be stored.")
     @Macro
     @Nullable
     private String dataset;
 
+    @Name(TABLE)
     @Description("The table to store the query results in. If not specified, the results will not be stored.")
     @Macro
     @Nullable
     private String table;
 
+    @Description("Whether to set the results of the first row as arguments.")
+    @Macro
+    private String setAsArguments;
+
     public boolean isLegacySQL() {
-      return legacy.equalsIgnoreCase("true");
+      return dialect.equalsIgnoreCase("legacy");
     }
 
     public boolean shouldUseCache() {
       return useCache.equalsIgnoreCase("true");
+    }
+
+    public boolean shouldSetAsArguments() {
+      return setAsArguments.equalsIgnoreCase("true");
     }
 
     public String getLocation() {
@@ -182,28 +225,28 @@ public final class BigQueryExecute extends Action {
       return table;
     }
 
-    public void validate() {
+    public void validate(FailureCollector failureCollector) {
       // check the mode is valid
-      if (!containsMacro("mode")) {
-        getMode();
+      if (!containsMacro(MODE)) {
+        try {
+          getMode();
+        } catch (IllegalArgumentException e) {
+          failureCollector.addFailure(e.getMessage(),
+                                      "The mode must be 'batch' or 'interactive'.").withConfigProperty(MODE);
+        }
       }
 
-      if (!containsMacro("sql") && (sql == null || sql.isEmpty())) {
-        throw new IllegalArgumentException("SQL not specified. Please specify a SQL to execute");
+      if (!containsMacro(SQL) && Strings.isNullOrEmpty(sql)) {
+        failureCollector.addFailure("SQL not specified. Please specify a SQL to execute",
+                                    null).withConfigProperty(SQL);
       }
 
       // validates that either they are null together or not null together
-      if ((dataset == null && table != null) || (table == null && dataset != null)) {
-        throw new IllegalArgumentException("Dataset and table must be specified together.");
+      if ((!containsMacro(DATASET) && !containsMacro(TABLE)) &&
+            (Strings.isNullOrEmpty(dataset) != Strings.isNullOrEmpty(table))) {
+        failureCollector.addFailure("Dataset and table must be specified together.", null);
       }
-
-      if (dataset != null) {
-        // if one is not null then we know another is not null either. Now validate they are empty or non-empty
-        // together
-        if ((dataset.isEmpty() && !table.isEmpty()) || (table.isEmpty() && !dataset.isEmpty())) {
-          throw new IllegalArgumentException("Dataset and table must be specified together.");
-        }
-      }
+      failureCollector.getOrThrowException();
     }
   }
 }

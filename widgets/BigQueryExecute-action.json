@@ -2,7 +2,7 @@
   "metadata": {
     "spec-version": "1.5"
   },
-  "display-name": "Google BigQuery Execute",
+  "display-name": "BigQuery Execute",
   "configuration-groups": [
     {
       "label": "Basic",
@@ -20,7 +20,7 @@
           "label": "SQL",
           "name": "sql",
           "widget-attributes": {
-            "placeholder": "Specifies the BigQuery SQL to be executed."
+            "placeholder": "SELECT * from [dataset].[table]"
           }
         }
       ]
@@ -29,20 +29,20 @@
       "label": "Advanced",
       "properties": [
         {
-          "name": "legacy",
-          "label": "Legacy",
+          "name": "dialect",
+          "label": "Dialect",
           "widget-type": "radio-group",
           "widget-attributes": {
             "layout": "inline",
-            "default": "false",
+            "default": "standard",
             "options": [
               {
-                "id": "true",
-                "label": "True"
+                "id": "legacy",
+                "label": "Legacy"
               },
               {
-                "id": "false",
-                "label": "False"
+                "id": "standard",
+                "label": "Standard"
               }
             ]
           }
@@ -84,7 +84,7 @@
         },
         {
           "name": "useCache",
-          "label": "UseCache",
+          "label": "Use Cache",
           "widget-type": "radio-group",
           "widget-attributes": {
             "layout": "inline",
@@ -108,6 +108,25 @@
           "widget-attributes": {
             "placeholder": "Location of the job.",
             "default": "US"
+          }
+        },
+        {
+          "name": "setAsArguments",
+          "label": "Set As Arguments",
+          "widget-type": "radio-group",
+          "widget-attributes": {
+            "layout": "inline",
+            "default": "false",
+            "options": [
+              {
+                "id": "true",
+                "label": "True"
+              },
+              {
+                "id": "false",
+                "label": "False"
+              }
+            ]
           }
         }
       ]

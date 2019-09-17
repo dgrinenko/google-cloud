@@ -21,14 +21,16 @@ Properties
 ----------
 **Project ID**: Google Cloud Project ID, which uniquely identifies a project.
 It can be found on the Dashboard in the Google Cloud Platform Console.
+This is the project that the BigQuery SQL will run in.
 
 **SQL**: The SQL command to execute.
 
-**Legacy**: Specified whether to use BigQuery's legacy SQL dialect for this query. By default this property is
-set to 'false'. If set to 'false', the query will use BigQuery's Standard SQL.
+**Dialect**: Specified the dialect for the BigQuery SQL. The value must be 'legacy' or 'standard'. If set to 'standard',
+the query will use BigQuery's standard SQL: https://cloud.google.com/bigquery/sql-reference/.
+If set to 'legacy', BigQuery's legacy SQL dialect will be used for this query.
 
 **Mode**: Mode to execute the query in. The value must be 'batch' or 'interactive'. A batch query is executed as
-soon as possible and count towards the concurrent rate limit and the daily rate limit. An interactive query is
+soon as possible and counts towards the concurrent rate limit and the daily rate limit. An interactive query is
 queued and started as soon as idle resources are available, usually within a few minutes. If the query hasn't
 started within 3 hours, its priority is changed to 'interactive'.
 
@@ -36,9 +38,12 @@ started within 3 hours, its priority is changed to 'interactive'.
 
 **Table Name**: The table to store the query results in. If not specified, the results will not be stored.
 
-**UseCache**: Specifies whether to use cache when executing the query.
+**Use Cache**: Specifies whether to look for the result in the query cache. The query cache is a best-effort
+cache that will be flushed whenever tables in the query are modified.
 
-**Job Location**: Location of the job. It must match the location of the dataset specified in the query. Defaults to 'US'
+**Job Location**: Location of the job. It must match the location of the dataset specified in the query.
+
+**Set As Arguments**: Whether to set the results of the first row as arguments.
 
 **Service Account File Path**: Path on the local file system of the service account key used for
 authorization. Can be set to 'auto-detect' when running on a Dataproc cluster.
