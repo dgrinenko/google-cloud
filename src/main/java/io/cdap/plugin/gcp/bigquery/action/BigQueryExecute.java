@@ -244,7 +244,8 @@ public final class BigQueryExecute extends Action {
       // validates that either they are null together or not null together
       if ((!containsMacro(DATASET) && !containsMacro(TABLE)) &&
             (Strings.isNullOrEmpty(dataset) != Strings.isNullOrEmpty(table))) {
-        failureCollector.addFailure("Dataset and table must be specified together.", null);
+        failureCollector.addFailure("Dataset and table must be specified together.", null)
+          .withConfigProperty(TABLE).withConfigProperty(DATASET);
       }
       failureCollector.getOrThrowException();
     }
